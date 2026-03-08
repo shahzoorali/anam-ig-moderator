@@ -3,6 +3,7 @@ import json
 import time
 import requests
 import boto3
+import urllib.parse
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
@@ -45,7 +46,7 @@ ses = boto3.client(
     aws_secret_access_key=AWS_SECRET_KEY
 )
 
-# Shared headers for Instagram Web calls
+# Shared headers for Instagram Web actions (deletions)
 IG_HEADERS = {
     'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     'X-CSRFToken': IG_CSRFTOKEN,
@@ -71,21 +72,18 @@ def save_cache(cache):
         json.dump(list(cache), f)
 
 def check_ai_sentiment(text):
-    """Uses AWS Bedrock (Minimax) to check if a comment is negative or toxic."""
+    """Uses AWS Bedrock (Minimax) via Converse API to check sentiment."""
+    # Safety: Ignore very short or emoji-only comments for AI to save costs/tokens
+    if len(text.strip()) < 4: return False
+    
     prompt = f"Analyze the following Instagram comment. Is it negative, toxic, hateful, or spam? Answer ONLY 'YES' or 'NO'.\n\nComment: {text}"
     
     try:
-        # Minimax M2.1 ID in us-east-1
-        response = bedrock.invoke_model(
+        response = bedrock.converse(
             modelId='minimax.minimax-m2.1',
-            contentType='application/json',
-            accept='application/json',
-            body=json.dumps({
-                "messages": [{"role": "user", "content": [{"text": prompt}]}]
-            })
+            messages=[{"role": "user", "content": [{"text": prompt}]}]
         )
-        body = json.loads(response['body'].read())
-        reply = body['output']['message']['content'][0]['text']
+        reply = response['output']['message']['content'][0]['text']
         return "YES" in reply.strip().upper()
     except Exception as e:
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Bedrock error: {e}")
@@ -94,7 +92,8 @@ def check_ai_sentiment(text):
 def send_email_alert(shortcode, comment_text, username, reason):
     """Sends an email notification via SES when a comment is deleted."""
     subject = f"IG MODERATOR: Comment Deleted on {shortcode}"
-    body = f"The following comment was deleted from @{IG_USERNAME}'s post (https://instagram.com/p/{shortcode}/):\n\nUser: @{username}\nComment: {comment_text}\nReason: {reason}\n\nTime: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+    link = f"https://www.instagram.com/p/{shortcode}/"
+    body = f"The following comment was deleted from @{IG_USERNAME}'s post ({link}):\n\nUser: @{username}\nComment: {comment_text}\nReason: {reason}\n\nTime: {time.strftime('%Y-%m-%d %H:%M:%S')}"
     
     try:
         ses.send_email(
@@ -107,8 +106,6 @@ def send_email_alert(shortcode, comment_text, username, reason):
         )
     except Exception as e:
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SES error: {e}")
-
-# --- INSTAGRAM ACTIONS ---
 
 def delete_comment(media_id, comment_id):
     """Deletes a comment using the Instagram Web API."""
@@ -126,47 +123,50 @@ def delete_comment(media_id, comment_id):
         return False
 
 def scrape_and_moderate(browser_context, cache):
-    """Fetches posts and comments via Playwright's authenticated context."""
+    """Main moderation logic using Playwright context."""
     try:
-        # 1. Fetch Posts
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Fetching latest feed items...")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Fetching latest feed...")
         feed_url = f"https://www.instagram.com/api/v1/feed/user/{IG_USER_ID}/"
         res = browser_context.request.get(feed_url, headers={'X-IG-App-ID': '936619743392459'})
         
         if res.status != 200:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Feed fetch failed: {res.status}")
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Feed error: {res.status}")
             return
 
-        data = res.json()
-        items = data.get('items', [])[:5] # Check latest 5 posts/reels
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Scanning {len(items)} posts/reels...")
+        items = res.json().get('items', [])[:5]
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Checking {len(items)} items...")
 
         for item in items:
             media_id = item['pk']
             shortcode = item['code']
             
-            # 2. Fetch Comments
-            c_url = f"https://www.instagram.com/api/v1/media/{media_id}/comments/"
+            # Fetch comments via GraphQL
+            variables = json.dumps({"shortcode": shortcode, "first": 20})
+            url = f"https://www.instagram.com/graphql/query/?query_hash=97b41c52301f77ce508f55e66d17620e&variables={urllib.parse.quote(variables)}"
+            
             c_res = browser_context.request.get(
-                c_url, 
+                url, 
                 headers={'X-IG-App-ID': '936619743392459', 'Referer': f'https://www.instagram.com/p/{shortcode}/'}
             )
             
             if c_res.status != 200:
-                # Some posts might not return comments in JSON format if challenged, we skip those
                 continue
                 
             try:
                 c_data = c_res.json()
-                comments = c_data.get('comments', [])
+                edges = c_data['data']['shortcode_media']['edge_media_to_parent_comment']['edges']
                 
-                for comment in comments:
-                    comment_id = str(comment['pk'])
+                new_comments_found = 0
+                for edge in edges:
+                    node = edge['node']
+                    comment_id = str(node['id'])
+                    
                     if comment_id in cache:
                         continue
-                        
-                    text = comment['text']
-                    author = comment['user']['username']
+                    
+                    new_comments_found += 1
+                    text = node['text']
+                    author = node['owner']['username']
                     
                     reason = None
                     text_lower = text.lower()
@@ -174,27 +174,29 @@ def scrape_and_moderate(browser_context, cache):
                         reason = "Keyword Match"
                     elif author != IG_USERNAME:
                         if check_ai_sentiment(text):
-                            reason = "AI categorized as Negative/Toxic"
+                            reason = "AI categorized as Negative"
                             
                     if reason:
                         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] !!! DELETING {comment_id} from @{author}: {reason}")
                         if delete_comment(media_id, comment_id):
                             send_email_alert(shortcode, text, author, reason)
-                            
+                    
                     cache.add(comment_id)
-                save_cache(cache)
-                time.sleep(1)
-            except:
-                continue
+                
+                if new_comments_found > 0:
+                    save_cache(cache)
+                    
+            except Exception as e:
+                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Post {shortcode} error: {e}")
 
     except Exception as e:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Loop error: {e}")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Moderator error: {e}")
 
 # --- MAIN ---
 
 def main():
-    print(f"=== Starting Instagram AI Moderator (Stable Web Scraper) ===")
-    print(f"Target Account: @{IG_USERNAME} ({IG_USER_ID})")
+    print(f"=== Starting Instagram AI Moderator (Stable GQL Scraper) ===")
+    print(f"Target Account: @{IG_USERNAME}")
     
     cache = load_cache()
     
@@ -207,9 +209,8 @@ def main():
         ])
         
         while True:
-            print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Waking up: Checking new comments...")
+            print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Waking up: Performing sweep...")
             scrape_and_moderate(context, cache)
-            
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sleeping for 15 minutes...")
             time.sleep(15 * 60)
 
