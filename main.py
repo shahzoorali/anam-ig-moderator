@@ -149,7 +149,7 @@ def scrape_and_moderate(browser_context, cache):
             shortcode = item['code']
             
             # Fetch comments via GraphQL
-            variables = json.dumps({"shortcode": shortcode, "first": 20})
+            variables = json.dumps({"shortcode": shortcode, "first": 50})
             url = f"https://www.instagram.com/graphql/query/?query_hash=97b41c52301f77ce508f55e66d17620e&variables={urllib.parse.quote(variables)}"
             
             c_res = browser_context.request.get(
