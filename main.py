@@ -181,6 +181,7 @@ def scrape_and_moderate(browser_context, cache):
                             
                     if reason:
                         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] !!! DELETING {comment_id} from @{author}: {reason}")
+                        print(f"    Comment Text: {text}")
                         if delete_comment(media_id, comment_id):
                             send_email_alert(shortcode, text, author, reason)
                     
