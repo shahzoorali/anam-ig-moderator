@@ -111,9 +111,12 @@ def check_and_delete_comments(cl, cache):
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error fetching recent posts: {e}")
         return
 
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Found {len(recent_media)} recent posts/reels. Analyzing...")
+
     for media in recent_media:
         try:
             comments = cl.media_comments(media.pk)
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Post {media.code}: Found {len(comments)} comments.")
         except Exception as e:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error fetching comments for media {media.pk}: {e}")
             continue
@@ -144,7 +147,9 @@ def check_and_delete_comments(cl, cache):
             
             # Mark as processed immediately even if deletion failed (to avoid loop) or if valid
             cache.add(comment.pk)
-            save_cache(cache)
+    
+    # Save cache at the end of the run
+    save_cache(cache)
 
 def login_with_session_or_creds():
     cl = Client()
