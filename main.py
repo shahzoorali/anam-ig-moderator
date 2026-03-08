@@ -168,16 +168,8 @@ def login_with_session_or_creds():
     if IG_SESSIONID:
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Attempting login via Session ID...")
         try:
-            # Manually inject session and csrf cookies
-            cl.set_settings({
-                "uuids": cl.settings["uuids"],
-                "cookie_jar": {
-                    "cookies": [
-                        {"name": "sessionid", "value": IG_SESSIONID, "domain": ".instagram.com", "path": "/"},
-                        {"name": "csrftoken", "value": IG_CSRFTOKEN or "", "domain": ".instagram.com", "path": "/"}
-                    ]
-                }
-            })
+            cl.login_by_sessionid(IG_SESSIONID)
+            # Basic validation
             cl.get_timeline_feed()
             cl.dump_settings(SESSION_FILE)
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Login via Session ID successful!")
