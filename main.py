@@ -16,6 +16,8 @@ else:
 IG_USERNAME = os.getenv("IG_USERNAME", "")
 IG_PASSWORD = os.getenv("IG_PASSWORD", "")
 
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 SMTP_USER = os.getenv("SMTP_USER", "")
@@ -34,7 +36,12 @@ KEYWORDS = ["boycottexpo", "boycotexpo", "banexpo", "bannexpo", "boycott"]
 CACHE_FILE = "processed_comments.json"
 SESSION_FILE = "session.json"
 
-bedrock_client = boto3.client('bedrock-runtime', region_name=AWS_REGION)
+bedrock_client = boto3.client(
+    'bedrock-runtime', 
+    region_name=AWS_REGION,
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+)
 
 def load_cache():
     if os.path.exists(CACHE_FILE):
