@@ -76,9 +76,12 @@ def check_ai_sentiment(text):
     if len(text.strip()) < 4: return False
     
     prompt = (
-        f"You are a strict Instagram moderator. Analyze this comment: '{text}'\n"
-        "Is this comment HATEFUL, HARASSING, or CLEAR SPAM (e.g. bots, crypto scams)?\n"
-        "If it is a general comment, question, food review, or just neutral, answer NO.\n"
+        "Analyze this Instagram comment for the 'Daawat-e-Ramzaan' expo.\n"
+        f"Comment: '{text}'\n\n"
+        "Guidelines:\n"
+        "1. Identify Hinglish/Hindi written in Roman script (e.g., 'bakwas', 'bekar', 'chor', 'loot').\n"
+        "2. Flag as YES if the comment contains: HATE, SPAM, HARASSMENT, FRUSTRATION, or NEGATIVE CRITICISM (e.g., calling the event rubbish, a scam, or complaining about prices/management in a toxic way).\n"
+        "3. Flag as NO if the comment is a simple question, a food review (even if average), neutral, or positive.\n\n"
         "Answer ONLY 'YES' or 'NO'."
     )
     
