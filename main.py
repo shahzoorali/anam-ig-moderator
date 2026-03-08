@@ -155,13 +155,11 @@ def login_with_session_or_creds():
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Found session.json. Logging in using session...")
         try:
             cl.load_settings(SESSION_FILE)
-            cl.login(IG_USERNAME, IG_PASSWORD)
-            # Basic validation check
             cl.get_timeline_feed() 
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Session login successful!")
             return cl
         except Exception as e:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Session failed, attempting fresh login: {e}")
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] session.json failed: {e}")
             if os.path.exists(SESSION_FILE):
                 os.remove(SESSION_FILE)
 
