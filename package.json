@@ -1,0 +1,15 @@
+{
+  "name": "anam-ig-moderator",
+  "version": "1.0.0",
+  "description": "An enterprise-ready Python bot designed to run on AWS EC2, monitor your Instagram account's recent posts, delete negative/spam comments using Keyword matching and AWS Bedrock (Minimax M2.1 AI), and notify you via Amazon SES emails.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}

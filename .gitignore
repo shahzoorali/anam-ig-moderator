@@ -5,3 +5,14 @@ processed_comments.json
 venv/
 __pycache__/
 *.pyc
+node_modules/
+package-lock.json
+*.json
+!processed_comments.json
+!package.json
+!requirements.txt
+*.txt
+profile_dump.json
+debug_json.p*
+test_*.py
+dump_json.py

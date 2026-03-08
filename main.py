@@ -1,230 +1,217 @@
 import os
 import json
 import time
-import smtplib
-from email.message import EmailMessage
+import requests
 import boto3
 from dotenv import load_dotenv
-from instagrapi import Client
-from instagrapi.exceptions import LoginRequired
+from playwright.sync_api import sync_playwright
 
-if os.path.exists(".env.local"):
-    load_dotenv(".env.local")
-else:
-    load_dotenv()
+# Load environment variables
+load_dotenv('.env.local')
 
-IG_USERNAME = os.getenv("IG_USERNAME", "")
-IG_PASSWORD = os.getenv("IG_PASSWORD", "")
-IG_SESSIONID = os.getenv("IG_SESSIONID", "")
-IG_CSRFTOKEN = os.getenv("IG_CSRFTOKEN", "")
+# --- CONFIGURATION ---
+IG_USERNAME = os.getenv('IG_USERNAME')
+IG_SESSIONID = os.getenv('IG_SESSIONID')
+IG_CSRFTOKEN = os.getenv('IG_CSRFTOKEN')
+IG_USER_ID = os.getenv('IG_USER_ID')
 
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+# AWS Credentials
+AWS_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY_ID')
+AWS_SECRET_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
 
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASS = os.getenv("SMTP_PASS", "")
-SMTP_HOST = os.getenv("SMTP_HOST", "email-smtp.us-east-1.amazonaws.com")
-SMTP_PORT = os.getenv("SMTP_PORT", "587")
-SENDER_EMAIL = os.getenv("SENDER_EMAIL", "")
-RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL", "")
+# Email Configuration
+SENDER_EMAIL = os.getenv('SENDER_EMAIL')
+RECEIVER_EMAIL = os.getenv('RECEIVER_EMAIL')
 
-# Bedrock Minimax setup
-# The Minimax M2.1 model ID on Bedrock is typically "minimax.text-v1" or similar
-# Ensure your EC2 Instance Profile has 'bedrock:InvokeModel' IAM permission.
-MODEL_ID = "minimax.text-v1" 
+# Forbidden Keywords
+KEYWORDS = ["boycottexpo", "boycott", "hate", "scam", "fake"]
 
-KEYWORDS = ["boycottexpo", "boycotexpo", "banexpo", "bannexpo", "boycott"]
+# Files
 CACHE_FILE = "processed_comments.json"
-SESSION_FILE = "session.json"
 
-bedrock_client = boto3.client(
-    'bedrock-runtime', 
+# --- CLIENTS ---
+bedrock = boto3.client(
+    service_name='bedrock-runtime',
     region_name=AWS_REGION,
-    aws_access_key_id=AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY
 )
+
+ses = boto3.client(
+    service_name='ses',
+    region_name=AWS_REGION,
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY
+)
+
+# Shared headers for Instagram Web calls
+IG_HEADERS = {
+    'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    'X-CSRFToken': IG_CSRFTOKEN,
+    'Cookie': f'sessionid={IG_SESSIONID}; csrftoken={IG_CSRFTOKEN};',
+    'X-IG-App-ID': '936619743392459',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Referer': 'https://www.instagram.com/',
+}
+
+# --- UTILITIES ---
 
 def load_cache():
     if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r") as f:
-            return set(json.load(f))
+        with open(CACHE_FILE, 'r') as f:
+            try:
+                return set(json.load(f))
+            except:
+                return set()
     return set()
 
 def save_cache(cache):
-    with open(CACHE_FILE, "w") as f:
+    with open(CACHE_FILE, 'w') as f:
         json.dump(list(cache), f)
 
-def send_email_alert(media, comment, reason):
-    msg = EmailMessage()
-    msg['Subject'] = 'IG Comment Deleted Notification'
-    msg['From'] = SENDER_EMAIL
-    msg['To'] = RECEIVER_EMAIL
-    
-    body = f"""
-The Moderation Bot automatically deleted a comment from your Instagram account.
-
-Reason for deletion: {reason}
-Time: {comment.created_at_utc}
-Post Link: https://instagram.com/p/{media.code}/
-
-Comment Details:
-Username: {comment.user.username}
-Comment Text: "{comment.text}"
-"""
-    msg.set_content(body)
-    
-    try:
-        with smtplib.SMTP(SMTP_HOST, int(SMTP_PORT)) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.send_message(msg)
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Email alert sent to {RECEIVER_EMAIL}")
-    except Exception as e:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Failed to send email alert: {e}")
-
 def check_ai_sentiment(text):
-    prompt = f"Evaluate the following text and determine if it is highly negative, abusive, or spammy. Answer strictly with 'YES' if it is negative/abusive/spammy, or 'NO' if it is acceptable.\nText: \"{text}\""
+    """Uses AWS Bedrock (Minimax) to check if a comment is negative or toxic."""
+    prompt = f"Analyze the following Instagram comment. Is it negative, toxic, hateful, or spam? Answer ONLY 'YES' or 'NO'.\n\nComment: {text}"
     
     try:
-        # We use Converse API which handles standard payload formats across models
-        response = bedrock_client.converse(
-            modelId=MODEL_ID,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [{"text": prompt}]
-                }
-            ]
+        # Minimax M2.1 ID in us-east-1
+        response = bedrock.invoke_model(
+            modelId='minimax.minimax-m2.1',
+            contentType='application/json',
+            accept='application/json',
+            body=json.dumps({
+                "messages": [{"role": "user", "content": [{"text": prompt}]}]
+            })
         )
-        reply_text = response['output']['message']['content'][0]['text']
-        return "YES" in reply_text.strip().upper()
+        body = json.loads(response['body'].read())
+        reply = body['output']['message']['content'][0]['text']
+        return "YES" in reply.strip().upper()
     except Exception as e:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Bedrock Error for text '{text}': {e}")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Bedrock error: {e}")
         return False
 
-def check_and_delete_comments(cl, cache):
+def send_email_alert(shortcode, comment_text, username, reason):
+    """Sends an email notification via SES when a comment is deleted."""
+    subject = f"IG MODERATOR: Comment Deleted on {shortcode}"
+    body = f"The following comment was deleted from @{IG_USERNAME}'s post (https://instagram.com/p/{shortcode}/):\n\nUser: @{username}\nComment: {comment_text}\nReason: {reason}\n\nTime: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+    
     try:
-        # Fetching recent posts/reels (5 recent posts)
-        recent_media = cl.user_medias(cl.user_id, amount=5)
+        ses.send_email(
+            Source=SENDER_EMAIL,
+            Destination={'ToAddresses': [RECEIVER_EMAIL]},
+            Message={
+                'Subject': {'Data': subject},
+                'Body': {'Text': {'Data': body}}
+            }
+        )
     except Exception as e:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error fetching recent posts: {e}")
-        return
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SES error: {e}")
 
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Found {len(recent_media)} recent posts/reels. Analyzing...")
+# --- INSTAGRAM ACTIONS ---
 
-    for media in recent_media:
-        try:
-            comments = cl.media_comments(media.pk)
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Post {media.code}: Found {len(comments)} comments.")
-        except Exception as e:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error fetching comments for media {media.pk}: {e}")
-            continue
+def delete_comment(media_id, comment_id):
+    """Deletes a comment using the Instagram Web API."""
+    url = f"https://www.instagram.com/api/v1/web/comments/{media_id}/delete/{comment_id}/"
+    try:
+        res = requests.post(url, headers=IG_HEADERS)
+        if res.status_code == 200:
+            result = res.json()
+            if result.get('status') == 'ok':
+                return True
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Delete failed for {comment_id}: {res.text[:100]}")
+        return False
+    except Exception as e:
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Delete request error: {e}")
+        return False
 
-        for comment in comments:
-            if comment.pk in cache:
+def scrape_and_moderate(browser_context, cache):
+    """Fetches posts and comments via Playwright's authenticated context."""
+    try:
+        # 1. Fetch Posts
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Fetching latest feed items...")
+        feed_url = f"https://www.instagram.com/api/v1/feed/user/{IG_USER_ID}/"
+        res = browser_context.request.get(feed_url, headers={'X-IG-App-ID': '936619743392459'})
+        
+        if res.status != 200:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Feed fetch failed: {res.status}")
+            return
+
+        data = res.json()
+        items = data.get('items', [])[:5] # Check latest 5 posts/reels
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Scanning {len(items)} posts/reels...")
+
+        for item in items:
+            media_id = item['pk']
+            shortcode = item['code']
+            
+            # 2. Fetch Comments
+            c_url = f"https://www.instagram.com/api/v1/media/{media_id}/comments/"
+            c_res = browser_context.request.get(
+                c_url, 
+                headers={'X-IG-App-ID': '936619743392459', 'Referer': f'https://www.instagram.com/p/{shortcode}/'}
+            )
+            
+            if c_res.status != 200:
+                # Some posts might not return comments in JSON format if challenged, we skip those
+                continue
+                
+            try:
+                c_data = c_res.json()
+                comments = c_data.get('comments', [])
+                
+                for comment in comments:
+                    comment_id = str(comment['pk'])
+                    if comment_id in cache:
+                        continue
+                        
+                    text = comment['text']
+                    author = comment['user']['username']
+                    
+                    reason = None
+                    text_lower = text.lower()
+                    if any(kw in text_lower for kw in KEYWORDS):
+                        reason = "Keyword Match"
+                    elif author != IG_USERNAME:
+                        if check_ai_sentiment(text):
+                            reason = "AI categorized as Negative/Toxic"
+                            
+                    if reason:
+                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] !!! DELETING {comment_id} from @{author}: {reason}")
+                        if delete_comment(media_id, comment_id):
+                            send_email_alert(shortcode, text, author, reason)
+                            
+                    cache.add(comment_id)
+                save_cache(cache)
+                time.sleep(1)
+            except:
                 continue
 
-            text_lower = comment.text.lower()
-            delete_reason = None
-            
-            # Phase 1: Keyword match
-            if any(kw in text_lower for kw in KEYWORDS):
-                delete_reason = f"Keyword Match: Contains a forbidden keyword"
-            
-            # Phase 2: AI Negative Sentiment detection
-            elif comment.user.pk != cl.user_id: # Do not analyze/delete our own comments
-                if check_ai_sentiment(comment.text):
-                    delete_reason = "AI categorized as Negative/Spammy"
-                    
-            if delete_reason:
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Deleting comment {comment.pk} because: {delete_reason}")
-                try:
-                    cl.comment_bulk_delete(media.pk, [comment.pk])
-                    send_email_alert(media, comment, delete_reason)
-                except Exception as del_err:
-                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Failed to delete comment: {del_err}")
-            
-            # Mark as processed immediately even if deletion failed (to avoid loop) or if valid
-            cache.add(comment.pk)
-    
-    # Save cache at the end of the run
-    save_cache(cache)
-
-def login_with_session_or_creds():
-    cl = Client()
-    # Randomize user agent to look less like a bot
-    cl.set_user_agent()
-    
-    if os.path.exists(SESSION_FILE):
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Found session.json. Logging in using session...")
-        try:
-            cl.load_settings(SESSION_FILE)
-            cl.get_timeline_feed() 
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Session login successful!")
-            return cl
-        except Exception as e:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] session.json failed: {e}")
-            if os.path.exists(SESSION_FILE):
-                os.remove(SESSION_FILE)
-
-    if IG_SESSIONID:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Attempting login via Session ID...")
-        try:
-            cl.login_by_sessionid(IG_SESSIONID)
-            # Basic validation
-            cl.get_timeline_feed()
-            cl.dump_settings(SESSION_FILE)
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Login via Session ID successful!")
-            return cl
-        except Exception as e:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Session ID login failed: {e}")
-
-    try:
-        # Randomize timing and user agent more aggressively
-        cl.delay_range = [5, 15]
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Attempting login for {IG_USERNAME}...")
-        cl.login(IG_USERNAME, IG_PASSWORD)
     except Exception as e:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Login failed: {e}")
-        print("-" * 50)
-        print("CRITICAL: Instagram has blocked this IP address.")
-        print("FIX: Run this script ONCE on your personal laptop/PC (not a server).")
-        print("1. Copy the 'session.json' it generates.")
-        print("2. Upload 'session.json' to this server.")
-        print("-" * 50)
-        return None
-        
-    cl.dump_settings(SESSION_FILE)
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Login successful! Session saved.")
-    return cl
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Loop error: {e}")
+
+# --- MAIN ---
 
 def main():
-    if not IG_USERNAME or not IG_PASSWORD:
-        print("ERROR: Please configure IG_USERNAME and IG_PASSWORD in .env")
-        return
-
-    print("=== Starting Instagram AI Moderator Bot ===")
-    cl = login_with_session_or_creds()
-    if not cl:
-        print("Bot halting unconditionally due to login failure.")
-        return
-
-    # To avoid analyzing old comments, let's preload the cache initially if empty.
-    # Otherwise, it runs bedock analysis on all existing past comments.
+    print(f"=== Starting Instagram AI Moderator (Stable Web Scraper) ===")
+    print(f"Target Account: @{IG_USERNAME} ({IG_USER_ID})")
+    
     cache = load_cache()
-
-    while True:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Waking up: Checking new comments...")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        context.add_cookies([
+            {"name": "sessionid", "value": IG_SESSIONID, "domain": ".instagram.com", "path": "/"},
+            {"name": "csrftoken", "value": IG_CSRFTOKEN, "domain": ".instagram.com", "path": "/"}
+        ])
         
-        # Ensure session is still active
-        try:
-            check_and_delete_comments(cl, cache)
-        except Exception as e:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Unexpected error in loop: {e}")
+        while True:
+            print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Waking up: Checking new comments...")
+            scrape_and_moderate(context, cache)
             
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sleeping for 15 minutes...")
-        time.sleep(15 * 60)
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sleeping for 15 minutes...")
+            time.sleep(15 * 60)
 
 if __name__ == "__main__":
     main()
