@@ -163,14 +163,19 @@ def login_with_session_or_creds():
             if os.path.exists(SESSION_FILE):
                 os.remove(SESSION_FILE)
     
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting fresh login for user: {IG_USERNAME}")
     try:
-        # Some accounts require a delay before login on new IPs
-        cl.delay_range = [2, 5]
+        # Randomize timing and user agent more aggressively
+        cl.delay_range = [5, 15]
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Attempting login for {IG_USERNAME}...")
         cl.login(IG_USERNAME, IG_PASSWORD)
     except Exception as e:
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Login failed: {e}")
-        print("TIP: If you see 'Expecting value', Instagram may be blocking the AWS IP. Try logging in from your local machine once to 'approve' the login.")
+        print("-" * 50)
+        print("CRITICAL: Instagram has blocked this IP address.")
+        print("FIX: Run this script ONCE on your personal laptop/PC (not a server).")
+        print("1. Copy the 'session.json' it generates.")
+        print("2. Upload 'session.json' to this server.")
+        print("-" * 50)
         return None
         
     cl.dump_settings(SESSION_FILE)
