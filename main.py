@@ -32,7 +32,7 @@ SMTP_HOST = os.getenv('SMTP_HOST', 'email-smtp.us-east-1.amazonaws.com')
 SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
 
 # Forbidden Keywords
-KEYWORDS = ["boycottexpo", "boycott", "hate", "scam", "fake"]
+KEYWORDS = ["boycottexpo", "boycott", "hate", "scam", "fake", "block", "fraud", "scammer", "fuck", "bitch"]
 
 # Files
 CACHE_FILE = "processed_comments.json"
@@ -141,7 +141,7 @@ def scrape_and_moderate(browser_context, cache):
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Feed error: {res.status}")
             return
 
-        items = res.json().get('items', [])[:5]
+        items = res.json().get('items', [])[:10]
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Checking {len(items)} items...")
 
         for item in items:
