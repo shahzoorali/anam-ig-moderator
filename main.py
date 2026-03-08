@@ -15,6 +15,8 @@ else:
 
 IG_USERNAME = os.getenv("IG_USERNAME", "")
 IG_PASSWORD = os.getenv("IG_PASSWORD", "")
+IG_SESSIONID = os.getenv("IG_SESSIONID", "")
+IG_CSRFTOKEN = os.getenv("IG_CSRFTOKEN", "")
 
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -162,7 +164,27 @@ def login_with_session_or_creds():
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Session failed, attempting fresh login: {e}")
             if os.path.exists(SESSION_FILE):
                 os.remove(SESSION_FILE)
-    
+
+    if IG_SESSIONID:
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Attempting login via Session ID...")
+        try:
+            # Manually inject session and csrf cookies
+            cl.set_settings({
+                "uuids": cl.settings["uuids"],
+                "cookie_jar": {
+                    "cookies": [
+                        {"name": "sessionid", "value": IG_SESSIONID, "domain": ".instagram.com", "path": "/"},
+                        {"name": "csrftoken", "value": IG_CSRFTOKEN or "", "domain": ".instagram.com", "path": "/"}
+                    ]
+                }
+            })
+            cl.get_timeline_feed()
+            cl.dump_settings(SESSION_FILE)
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Login via Session ID successful!")
+            return cl
+        except Exception as e:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Session ID login failed: {e}")
+
     try:
         # Randomize timing and user agent more aggressively
         cl.delay_range = [5, 15]
