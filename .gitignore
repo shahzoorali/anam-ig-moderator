@@ -1,0 +1,7 @@
+.env.local
+.env
+session.json
+processed_comments.json
+venv/
+__pycache__/
+*.pyc
