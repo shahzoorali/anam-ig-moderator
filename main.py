@@ -76,12 +76,14 @@ def check_ai_sentiment(text):
     if len(text.strip()) < 4: return False
     
     prompt = (
-        "Analyze this Instagram comment for the 'Daawat-e-Ramzaan' expo.\n"
+        "You are an AI Instagram moderator. Analyze this comment for the 'Daawat-e-Ramzaan' expo.\n"
         f"Comment: '{text}'\n\n"
+        "GOAL: Delete only TOXIC HATE, HARASSMENT, or SCAM SPAM.\n"
         "Guidelines:\n"
-        "1. Identify Hinglish/Hindi written in Roman script (e.g., 'bakwas', 'bekar', 'chor', 'loot').\n"
-        "2. Flag as YES if the comment contains: HATE, SPAM, HARASSMENT, FRUSTRATION, or NEGATIVE CRITICISM (e.g., calling the event rubbish, a scam, or complaining about prices/management in a toxic way).\n"
-        "3. Flag as NO if the comment is a simple question, a food review (even if average), neutral, or positive.\n\n"
+        "1. Flag as YES only if the comment is: Hateful (insults), Harassing (targeting individuals), or Clear Scam/Bot Spam (crypto, fake followers).\n"
+        "2. Flag as NO for: Neutral opinions, valid complaints (e.g. queue is long, parking is full), logistics advice, food reviews, or general questions.\n"
+        "3. Support Hinglish (Romanized Hindi): 'bakwas', 'fraud', 'chor', etc. should be flagged only if used in a hateful context.\n"
+        "4. If you are even slightly unsure, answer NO. Err on the side of keeping the comment.\n\n"
         "Answer ONLY 'YES' or 'NO'."
     )
     
