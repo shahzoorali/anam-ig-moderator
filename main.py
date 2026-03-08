@@ -4,6 +4,8 @@ import time
 import requests
 import boto3
 import urllib.parse
+import smtplib
+from email.mime.text import MIMEText
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
@@ -21,9 +23,13 @@ AWS_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
 
-# Email Configuration
+# Email Configuration (SMTP)
 SENDER_EMAIL = os.getenv('SENDER_EMAIL')
 RECEIVER_EMAIL = os.getenv('RECEIVER_EMAIL')
+SMTP_USER = os.getenv('SMTP_USER')
+SMTP_PASS = os.getenv('SMTP_PASS')
+SMTP_HOST = os.getenv('SMTP_HOST', 'email-smtp.us-east-1.amazonaws.com')
+SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
 
 # Forbidden Keywords
 KEYWORDS = ["boycottexpo", "boycott", "hate", "scam", "fake"]
@@ -34,13 +40,6 @@ CACHE_FILE = "processed_comments.json"
 # --- CLIENTS ---
 bedrock = boto3.client(
     service_name='bedrock-runtime',
-    region_name=AWS_REGION,
-    aws_access_key_id=AWS_ACCESS_KEY,
-    aws_secret_access_key=AWS_SECRET_KEY
-)
-
-ses = boto3.client(
-    service_name='ses',
     region_name=AWS_REGION,
     aws_access_key_id=AWS_ACCESS_KEY,
     aws_secret_access_key=AWS_SECRET_KEY
@@ -93,22 +92,23 @@ def check_ai_sentiment(text):
         return False
 
 def send_email_alert(shortcode, comment_text, username, reason):
-    """Sends an email notification via SES when a comment is deleted."""
+    """Sends an email notification via SMTP when a comment is deleted."""
     subject = f"IG MODERATOR: Comment Deleted on {shortcode}"
     link = f"https://www.instagram.com/p/{shortcode}/"
     body = f"The following comment was deleted from @{IG_USERNAME}'s post ({link}):\n\nUser: @{username}\nComment: {comment_text}\nReason: {reason}\n\nTime: {time.strftime('%Y-%m-%d %H:%M:%S')}"
     
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = RECEIVER_EMAIL
+
     try:
-        ses.send_email(
-            Source=SENDER_EMAIL,
-            Destination={'ToAddresses': [RECEIVER_EMAIL]},
-            Message={
-                'Subject': {'Data': subject},
-                'Body': {'Text': {'Data': body}}
-            }
-        )
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
     except Exception as e:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SES error: {e}")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SMTP error: {e}")
 
 def delete_comment(media_id, comment_id):
     """Deletes a comment using the Instagram Web API."""
