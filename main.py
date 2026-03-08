@@ -75,7 +75,12 @@ def check_ai_sentiment(text):
     # Safety: Ignore very short or emoji-only comments for AI to save costs/tokens
     if len(text.strip()) < 4: return False
     
-    prompt = f"Analyze the following Instagram comment. Is it negative, toxic, hateful, or spam? Answer ONLY 'YES' or 'NO'.\n\nComment: {text}"
+    prompt = (
+        f"You are a strict Instagram moderator. Analyze this comment: '{text}'\n"
+        "Is this comment HATEFUL, HARASSING, or CLEAR SPAM (e.g. bots, crypto scams)?\n"
+        "If it is a general comment, question, food review, or just neutral, answer NO.\n"
+        "Answer ONLY 'YES' or 'NO'."
+    )
     
     try:
         response = bedrock.converse(
