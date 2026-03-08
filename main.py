@@ -83,7 +83,10 @@ def check_ai_sentiment(text):
             modelId='minimax.minimax-m2.1',
             messages=[{"role": "user", "content": [{"text": prompt}]}]
         )
-        reply = response['output']['message']['content'][0]['text']
+        reply = ""
+        for part in response['output']['message']['content']:
+            if 'text' in part:
+                reply += part['text']
         return "YES" in reply.strip().upper()
     except Exception as e:
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Bedrock error: {e}")
