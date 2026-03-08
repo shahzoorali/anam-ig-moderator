@@ -119,19 +119,30 @@ def send_email_alert(shortcode, comment_text, username, reason):
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SMTP error: {e}")
 
 def delete_comment(media_id, comment_id):
-    """Deletes a comment using the Instagram Web API."""
-    url = f"https://www.instagram.com/api/v1/web/comments/{media_id}/delete/{comment_id}/"
-    try:
-        res = requests.post(url, headers=IG_HEADERS)
-        if res.status_code == 200:
-            result = res.json()
-            if result.get('status') == 'ok':
-                return True
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Delete failed for {comment_id}: {res.text[:100]}")
-        return False
-    except Exception as e:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Delete request error: {e}")
-        return False
+    """Deletes a comment using multiple endpoints to ensure success."""
+    # Pattern 1: Web API endpoint
+    urls = [
+        f"https://www.instagram.com/api/v1/web/comments/{media_id}/delete/{comment_id}/",
+        f"https://www.instagram.com/api/v1/comments/{media_id}/delete/"
+    ]
+    
+    for url in urls:
+        try:
+            # For the generic delete endpoint, it often expects IDs in the payload
+            if "web" not in url:
+                res = requests.post(url, headers=IG_HEADERS, data={'comment_ids_to_delete': comment_id})
+            else:
+                res = requests.post(url, headers=IG_HEADERS)
+                
+            if res.status_code == 200:
+                result = res.json()
+                if result.get('status') == 'ok':
+                    return True
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Endpoint failed {url}: {res.status_code}")
+        except Exception as e:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Request error for {url}: {e}")
+            
+    return False
 
 def scrape_and_moderate(browser_context, cache):
     """Main moderation logic using Playwright context."""
