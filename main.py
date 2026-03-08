@@ -146,28 +146,31 @@ def check_and_delete_comments(cl, cache):
 
 def login_with_session_or_creds():
     cl = Client()
+    # Randomize user agent to look less like a bot
+    cl.set_user_agent()
     
     if os.path.exists(SESSION_FILE):
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Found session.json. Logging in using session...")
-        cl.load_settings(SESSION_FILE)
         try:
+            cl.load_settings(SESSION_FILE)
             cl.login(IG_USERNAME, IG_PASSWORD)
-            cl.get_timeline_feed() # Validate session
+            # Basic validation check
+            cl.get_timeline_feed() 
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Session login successful!")
             return cl
         except Exception as e:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Session expired or invalid: {e}")
-            # fall through to fresh login
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Session failed, attempting fresh login: {e}")
+            if os.path.exists(SESSION_FILE):
+                os.remove(SESSION_FILE)
     
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting fresh login...")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting fresh login for user: {IG_USERNAME}")
     try:
-        # Note: If 2FA is enabled, instagrapi will prompt in the terminal here
+        # Some accounts require a delay before login on new IPs
+        cl.delay_range = [2, 5]
         cl.login(IG_USERNAME, IG_PASSWORD)
-    except LoginRequired:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Login Required / 2FA Challenge failed. Please check credentials or run manually.")
-        return None
     except Exception as e:
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Login failed: {e}")
+        print("TIP: If you see 'Expecting value', Instagram may be blocking the AWS IP. Try logging in from your local machine once to 'approve' the login.")
         return None
         
     cl.dump_settings(SESSION_FILE)
