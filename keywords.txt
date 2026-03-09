@@ -1,0 +1,33 @@
+# ============================================================
+# INSTANT DELETE — Unambiguous profanity/spam. Delete immediately.
+# These words should NEVER appear in legitimate comments.
+# ============================================================
+fuck
+bitch
+scammer
+nigger
+chutiya
+madarchod
+behenchod
+randi
+
+# ============================================================
+# QUARANTINE — Context-dependent words. Flag for review.
+# These MIGHT appear in legitimate comments, so quarantine first.
+# ============================================================
+boycottexpo
+boycott
+hate
+scam
+fake
+fraud
+block
+tamasha
+haram
+gunah
+astagfirullah
+sharam karo
+taubah
+wahiyat
+ghatiya
+bekar
