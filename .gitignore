@@ -2,6 +2,9 @@
 .env
 session.json
 processed_comments.json
+moderator.db
+moderator.log
+moderator.log.*
 venv/
 __pycache__/
 *.pyc
@@ -12,7 +15,10 @@ package-lock.json
 !package.json
 !requirements.txt
 *.txt
+!keywords.txt
+!requirements.txt
 profile_dump.json
 debug_json.p*
 test_*.py
 dump_json.py
+bot_output.log
